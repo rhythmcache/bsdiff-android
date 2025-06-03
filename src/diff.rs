@@ -47,8 +47,7 @@ use std::io::Write;
 ///
 /// ```rust
 /// use bsdiff::{diff, patch};
-/// use std::io::Cursor;
-///
+/// 
 /// // Create some test data
 /// let old_data = b"Hello, world!";
 /// let new_data = b"Hello, Rust!";
