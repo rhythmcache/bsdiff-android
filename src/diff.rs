@@ -35,6 +35,61 @@ use std::io::Write;
 ///
 /// The patch can be applied to the "old" file to return the new file, with `patch::patch()`.
 /// `old` and `new` correspond to the "old" and "new" file respectively. The patch will be written into `writer`.
+/// # Generic Parameters
+///
+/// * `T: Read` - Any readable source for patch data (e.g., `File`, `Cursor<Vec<u8>>`, `&[u8]`)
+/// * `W: Write + DerefMut<Target = [u8]>` - Any writable buffer that can be treated as a mutable byte slice
+///   (e.g., `Vec<u8>`, `AlignedVec`, `SmallVec`, custom buffer types)
+///
+/// # Examples
+///
+/// ## Basic usage with Vec<u8>
+///
+/// ```rust
+/// use bsdiff::{diff, patch};
+/// use std::io::Cursor;
+///
+/// // Create some test data
+/// let old_data = b"Hello, world!";
+/// let new_data = b"Hello, Rust!";
+///
+/// // Generate a patch
+/// let mut patch_data = Vec::new();
+/// diff(old_data, new_data, &mut patch_data)?;
+///
+/// // Apply the patch to reconstruct the new data
+/// let mut reconstructed = Vec::new();
+/// patch(old_data, &mut patch_data.as_slice(), &mut reconstructed)?;
+///
+/// assert_eq!(reconstructed, new_data);
+/// # Ok::<(), std::io::Error>(())
+/// ```
+///
+/// ## Usage with custom buffer types
+///
+/// The function works with any type that implements `Write + DerefMut<Target = [u8]>`:
+///
+/// ```rust
+/// use bsdiff::{patch, diff};
+/// use std::ops::DerefMut;
+///
+/// // Create some test data
+/// let old_data = b"Hello, world!";
+/// let new_data = b"Hello, Rust!";
+///
+/// // Generate a patch
+/// let mut patch_data = Vec::new();
+/// diff(old_data, new_data, &mut patch_data)?;
+///
+/// // Apply the patch to reconstruct the new data
+/// let mut reconstructed: smallvec::SmallVec<[_; 1024]> = smallvec::smallvec![];
+/// patch(old_data, &mut patch_data.as_slice(), &mut reconstructed)?;
+///
+/// assert_eq!(reconstructed.as_slice(), new_data);
+/// // The function also works with other buffer types like AlignedVec
+/// // or any custom type that implements the required traits
+/// # Ok::<(), std::io::Error>(())
+/// ```
 pub fn diff<T: Write>(old: &[u8], new: &[u8], writer: &mut T) -> io::Result<()> {
     bsdiff_internal(old, new, writer)
 }

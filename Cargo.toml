@@ -12,3 +12,6 @@ repository = "https://github.com/space-wizards/bsdiff-rs"
 edition = "2021"
 include = ["src/*.rs", "LICENSE", "README.md", "Cargo.toml"]
 rust-version = "1.59"
+
+[dev-dependencies]
+smallvec = { version = "1.15.0", features = ["write"] }
