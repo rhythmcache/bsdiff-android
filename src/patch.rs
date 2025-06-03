@@ -29,11 +29,16 @@
 
 use std::io;
 use std::io::Read;
+use std::ops::DerefMut;
 
 /// Apply a patch to an "old" file, returning the "new" file.
 ///
 /// `old` is the old file, `patch` will be read from with the patch,`new` is the buffer that will be written into.
-pub fn patch<T: Read>(old: &[u8], patch: &mut T, new: &mut Vec<u8>) -> io::Result<()> {
+pub fn patch<T, W>(old: &[u8], patch: &mut T, new: &mut W) -> io::Result<()>
+where
+    T: Read,
+    W: io::Write + DerefMut<Target = [u8]>,
+{
     let mut oldpos: usize = 0;
     loop {
         // Read control data
@@ -43,8 +48,10 @@ pub fn patch<T: Read>(old: &[u8], patch: &mut T, new: &mut Vec<u8>) -> io::Resul
         }
 
         // only seek can be negative
-        let mix_len = usize::try_from(u64::from_le_bytes(buf[0..8].try_into().unwrap())).map_err(|_| io::ErrorKind::InvalidData)?;
-        let copy_len = usize::try_from(u64::from_le_bytes(buf[8..16].try_into().unwrap())).map_err(|_| io::ErrorKind::InvalidData)?;
+        let mix_len = usize::try_from(u64::from_le_bytes(buf[0..8].try_into().unwrap()))
+            .map_err(|_| io::ErrorKind::InvalidData)?;
+        let copy_len = usize::try_from(u64::from_le_bytes(buf[8..16].try_into().unwrap()))
+            .map_err(|_| io::ErrorKind::InvalidData)?;
         let seek_len = offtin(buf[16..24].try_into().unwrap());
 
         // Read diff string and literal data at once
@@ -52,18 +59,28 @@ pub fn patch<T: Read>(old: &[u8], patch: &mut T, new: &mut Vec<u8>) -> io::Resul
             .checked_add(mix_len)
             .ok_or(io::ErrorKind::InvalidData)?;
         let mix_start = new.len();
-        let has_read = patch.take(to_read as u64).read_to_end(new)?;
+        let mut read_from = patch.take(to_read as u64);
+
+        let has_read = io::copy(&mut read_from, new)?;
 
         // oldpos needs to be checked before the for loop to optimize it better
-        if has_read != to_read {
+        if has_read != to_read as u64 {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
 
-        let mix_end = mix_start.checked_add(mix_len).ok_or(io::ErrorKind::InvalidData)?;
-        let mix_slice = new.get_mut(mix_start..mix_end).ok_or(io::ErrorKind::UnexpectedEof)?;
+        let mix_end = mix_start
+            .checked_add(mix_len)
+            .ok_or(io::ErrorKind::InvalidData)?;
+        let mix_slice = new
+            .get_mut(mix_start..mix_end)
+            .ok_or(io::ErrorKind::UnexpectedEof)?;
 
-        let oldpos_end = oldpos.checked_add(mix_len).ok_or(io::ErrorKind::InvalidData)?;
-        let old_slice = old.get(oldpos ..oldpos_end).ok_or(io::ErrorKind::UnexpectedEof)?;
+        let oldpos_end = oldpos
+            .checked_add(mix_len)
+            .ok_or(io::ErrorKind::InvalidData)?;
+        let old_slice = old
+            .get(oldpos..oldpos_end)
+            .ok_or(io::ErrorKind::UnexpectedEof)?;
 
         for (n, o) in mix_slice.iter_mut().zip(old_slice.iter().copied()) {
             *n = n.wrapping_add(o);
