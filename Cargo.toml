@@ -1,14 +1,14 @@
 [package]
-name = "bsdiff"
-version = "0.2.1"
-authors = ["pieterjan.briers@gmail.com", "Kornel <kornel@geekhood.net>"]
-description = "Rust port of the bsdiff binary diffing algorithm."
+name = "bsdiff-android"
+version = "0.0.1"
+authors = ["pieterjan.briers@gmail.com", "Kornel <kornel@geekhood.net>", "rhythmcache"]
+description = "BSDIFF / BSDF2 implementation compatible with Android OTA payloads"
 readme = "README.md"
 categories = ["compression"]
 keywords = ["bspatch", "patch", "diff", "delta", "binary"]
 license = "BSD-2-Clause"
-homepage = "https://lib.rs/bsdiff"
-repository = "https://github.com/space-wizards/bsdiff-rs"
+homepage = "https://github.com/rhythmcache/bsdiff-android"
+repository = "https://github.com/rhythmcache/bsdiff-android"
 edition = "2021"
 include = ["src/*.rs", "LICENSE", "README.md", "Cargo.toml"]
 rust-version = "1.59"

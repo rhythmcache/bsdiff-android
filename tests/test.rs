@@ -1,4 +1,5 @@
 use std::io::ErrorKind;
+use bsdiff_android as bsdiff;
 
 #[test]
 fn test_it() {
