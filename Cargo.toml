@@ -1,6 +1,6 @@
 [package]
 name = "bsdiff-android"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["pieterjan.briers@gmail.com", "Kornel <kornel@geekhood.net>", "rhythmcache"]
 description = "BSDIFF / BSDF2 implementation compatible with Android OTA payloads"
 readme = "README.md"
