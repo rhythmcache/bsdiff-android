@@ -17,7 +17,7 @@ Bsdiff/bspatch implementation with Android BSDF2 format support. Compatible with
 
 ## Usage Examples
 
-```rust
+```
 use bsdiff_android as bsdiff;
 
 fn main() {
@@ -37,7 +37,7 @@ fn main() {
 
 ### Classic BSDIFF40 Format
 
-```rust
+```
 use bsdiff_android::{diff_bsdiff40, patch};
 
 // Generate BSDIFF40 patch (compatible with original bsdiff tools)
@@ -51,7 +51,7 @@ patch(&old, &mut patch.as_slice(), &mut result)?;
 
 ### Android BSDF2 Format (OTA Updates)
 
-```rust
+```
 use bsdiff_android::{diff_bsdf2_uniform, patch_bsdf2, CompressionAlgorithm};
 
 // Generate BSDF2 patch with Brotli compression (Android standard)
@@ -65,7 +65,7 @@ patch_bsdf2(&old, &patch, &mut result)?;
 
 ### File Operations
 
-```rust
+```
 use bsdiff_android::{diff_bsdf2_uniform, patch_bsdf2, CompressionAlgorithm};
 use std::fs;
 
@@ -97,7 +97,7 @@ fn apply_update() -> std::io::Result<()> {
 
 ### Mixed Compression (Advanced)
 
-```rust
+```
 use bsdiff_android::{diff_bsdf2, CompressionAlgorithm};
 
 // Use different compression for each stream
@@ -122,7 +122,7 @@ diff_bsdf2(
 
 ## Compression Types
 
-```rust
+```
 CompressionAlgorithm::None    // No compression
 CompressionAlgorithm::Bz2     // BZ2 compression
 CompressionAlgorithm::Brotli  // Brotli (recommended for Android)
