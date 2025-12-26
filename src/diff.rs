@@ -28,6 +28,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+use std::cmp::Ordering;
+use std::io;
+use std::io::Write;
+
+use crate::bsdf2_writer::{Bsdf2Writer, CompressionAlgorithm, ControlEntry};
+
 /// Diff an "old" and a "new" file, returning a legacy BSDIFF40 patch.
 /// 
 /// This maintains backward compatibility - generates classic BZ2-compressed patches
