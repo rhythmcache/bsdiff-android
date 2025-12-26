@@ -7,62 +7,129 @@
 
 Bsdiff/bspatch implementation with Android BSDF2 format support. Compatible with Android OTA payloads.
 
-## Usage
+## Features
+
+-  Classic bsdiff/bspatch (raw format)
+-  BSDIFF40 format (BZ2 compressed, compatible with original tools)
+-  Android BSDF2 format (Brotli/BZ2/None compression)
+-  Fast suffix array construction
+
+
+## Usage Examples
 
 ```rust
+use bsdiff_android as bsdiff;
+
 fn main() {
-    let one = vec![1, 2, 3, 4, 5];
-    let two = vec![1, 2, 4, 6];
+    let old = vec![1, 2, 3, 4, 5];
+    let new = vec![1, 2, 4, 6];
     let mut patch = Vec::new();
 
-    bsdiff_android::diff(&one, &two, &mut patch).unwrap();
-
-    let mut patched = Vec::with_capacity(two.len());
-    bsdiff_android::patch(&one, &mut patch.as_slice(), &mut patched).unwrap();
-    assert_eq!(patched, two);
+    // Generate and apply patch
+    bsdiff::diff(&old, &new, &mut patch).unwrap();
+    
+    let mut patched = Vec::new();
+    bsdiff::patch(&old, &mut patch.as_slice(), &mut patched).unwrap();
+    assert_eq!(patched, new);
 }
 ```
 
-## Diffing Files
+
+### Classic BSDIFF40 Format
 
 ```rust
-fn diff_files(file_a: &str, file_b: &str, patch_file: &str) -> std::io::Result<()> {
-    let old = std::fs::read(file_a)?;
-    let new = std::fs::read(file_b)?;
+use bsdiff_android::{diff_bsdiff40, patch};
+
+// Generate BSDIFF40 patch (compatible with original bsdiff tools)
+let mut patch = Vec::new();
+diff_bsdiff40(&old, &new, &mut patch)?;
+
+// Apply patch
+let mut result = Vec::new();
+patch(&old, &mut patch.as_slice(), &mut result)?;
+```
+
+### Android BSDF2 Format (OTA Updates)
+
+```rust
+use bsdiff_android::{diff_bsdf2_uniform, patch_bsdf2, CompressionAlgorithm};
+
+// Generate BSDF2 patch with Brotli compression (Android standard)
+let mut patch = Vec::new();
+diff_bsdf2_uniform(&old, &new, &mut patch, CompressionAlgorithm::Brotli)?;
+
+// Apply BSDF2 patch
+let mut result = Vec::new();
+patch_bsdf2(&old, &patch, &mut result)?;
+```
+
+### File Operations
+
+```rust
+use bsdiff_android::{diff_bsdf2_uniform, patch_bsdf2, CompressionAlgorithm};
+use std::fs;
+
+fn create_update_package() -> std::io::Result<()> {
+    // Read old and new versions
+    let old = fs::read("app-v1.apk")?;
+    let new = fs::read("app-v2.apk")?;
+    
+    // Generate Android OTA patch
     let mut patch = Vec::new();
+    diff_bsdf2_uniform(&old, &new, &mut patch, CompressionAlgorithm::Brotli)?;
+    fs::write("update.bsdf2", &patch)?;
+    
+    println!("Patch size: {} bytes", patch.len());
+    Ok(())
+}
 
-    bsdiff_android::diff(&old, &new, &mut patch)?;
-    std::fs::write(patch_file, &patch)
+fn apply_update() -> std::io::Result<()> {
+    let old = fs::read("app-v1.apk")?;
+    let patch = fs::read("update.bsdf2")?;
+    
+    let mut new = Vec::new();
+    patch_bsdf2(&old, &patch, &mut new)?;
+    fs::write("app-v2.apk", &new)?;
+    
+    Ok(())
 }
 ```
 
-## Patching Files
+### Mixed Compression (Advanced)
 
 ```rust
-fn patch_file(file_a: &str, patch_file: &str, file_b: &str) -> std::io::Result<()> {
-    let old = std::fs::read(file_a)?;
-    let patch = std::fs::read(patch_file)?;
-    let mut new = Vec::new();
+use bsdiff_android::{diff_bsdf2, CompressionAlgorithm};
 
-    bsdiff_android::patch(&old, &mut patch.as_slice(), &mut new)?;
-    std::fs::write(file_b, &new)
-}
+// Use different compression for each stream
+let mut patch = Vec::new();
+diff_bsdf2(
+    &old,
+    &new,
+    &mut patch,
+    CompressionAlgorithm::Brotli,  // Control stream
+    CompressionAlgorithm::Brotli,  // Diff stream  
+    CompressionAlgorithm::Bz2,     // Extra stream
+)?;
 ```
 
-## Android BSDF2 Format
+## API Summary
+
+| Use Case | Generation | Application |
+|----------|-----------|-------------|
+| Raw format | `diff()` | `patch()` |
+| Classic BSDIFF40 | `diff_bsdiff40()` | `patch()` |
+| Android BSDF2 | `diff_bsdf2_uniform()` | `patch_bsdf2()` |
+
+## Compression Types
 
 ```rust
-use bsdiff_android::patch_bsdf2;
-
-fn apply_android_ota(old: &[u8], patch: &[u8]) -> std::io::Result<Vec<u8>> {
-    let mut new = Vec::new();
-    patch_bsdf2(old, patch, &mut new)?;
-    Ok(new)
-}
+CompressionAlgorithm::None    // No compression
+CompressionAlgorithm::Bz2     // BZ2 compression
+CompressionAlgorithm::Brotli  // Brotli (recommended for Android)
 ```
 
 ## License
 
 BSD-2-Clause
 
-Based on Colin Percival's bsdiff/bspatch algorithm.
+Based on Colin Percival's bsdiff/bspatch algorithm with Android BSDF2 extensions.
