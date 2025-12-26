@@ -28,21 +28,43 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-use std::cmp::Ordering;
-use std::io;
-use std::io::Write;
-
-/// Diff an "old" and a "new" file, returning a patch.
-///
-/// The patch can be applied to the "old" file to return the new file, with `patch::patch()`.
+/// Diff an "old" and a "new" file, returning a legacy BSDIFF40 patch.
 /// 
-/// # Performance
-/// This implementation includes optimizations:
-/// - Cache-friendly memory access patterns
-/// - Reduced allocations
-/// - SIMD-friendly operations where possible
+/// This maintains backward compatibility - generates classic BZ2-compressed patches
+/// that are identical to the original bsdiff implementation.
 pub fn diff<T: Write>(old: &[u8], new: &[u8], writer: &mut T) -> io::Result<()> {
     bsdiff_internal(old, new, writer)
+}
+
+/// Generate a legacy BSDIFF40 patch (BZ2 compressed)
+pub fn diff_bsdiff40<T: Write>(old: &[u8], new: &[u8], writer: &mut T) -> io::Result<()> {
+    let mut patch_writer = Bsdf2Writer::new_legacy();
+    bsdiff_with_writer(old, new, &mut patch_writer)?;
+    patch_writer.close(writer)
+}
+
+/// Generate a BSDF2 patch with specified compression algorithms
+pub fn diff_bsdf2<T: Write>(
+    old: &[u8],
+    new: &[u8],
+    writer: &mut T,
+    ctrl_alg: CompressionAlgorithm,
+    diff_alg: CompressionAlgorithm,
+    extra_alg: CompressionAlgorithm,
+) -> io::Result<()> {
+    let mut patch_writer = Bsdf2Writer::new(ctrl_alg, diff_alg, extra_alg);
+    bsdiff_with_writer(old, new, &mut patch_writer)?;
+    patch_writer.close(writer)
+}
+
+/// Generate a BSDF2 patch with all streams using the same compression
+pub fn diff_bsdf2_uniform<T: Write>(
+    old: &[u8],
+    new: &[u8],
+    writer: &mut T,
+    alg: CompressionAlgorithm,
+) -> io::Result<()> {
+    diff_bsdf2(old, new, writer, alg, alg, alg)
 }
 
 #[inline(always)]
@@ -65,7 +87,6 @@ fn split_internal(
     h: usize,
 ) -> Option<SplitParams> {
     if len < 16 {
-        // Small array: use simple insertion-like sort
         let mut k = start;
         while k < start + len {
             let mut j = 1;
@@ -83,7 +104,6 @@ fn split_internal(
                 }
                 i += 1;
             }
-            // Update V for all equal elements
             let kj = (k + j) as isize;
             for &Ii in &I[k..k + j] {
                 V[usz(Ii)] = kj - 1;
@@ -95,10 +115,8 @@ fn split_internal(
         }
         None
     } else {
-        // Large array: use three-way partitioning (similar to quicksort)
         let x = V[usz(I[start + len / 2] + h as isize)];
         
-        // Count elements: less than x, equal to x
         let mut jj = 0;
         let mut kk = 0;
         for &Ii in &I[start..start + len] {
@@ -113,7 +131,6 @@ fn split_internal(
         let jj = jj + start;
         let kk = kk + jj;
         
-        // Three-way partition
         let mut j = 0;
         let mut k = 0;
         let mut i = start;
@@ -140,12 +157,10 @@ fn split_internal(
             }
         }
         
-        // Recursively sort left partition
         if jj > start {
             split(I, V, start, jj - start, h);
         }
         
-        // Update V for equal elements
         let kk_minus_1 = (kk - 1) as isize;
         for &Ii in &I[jj..kk] {
             V[usz(Ii)] = kk_minus_1;
@@ -154,7 +169,6 @@ fn split_internal(
             I[jj] = -1;
         }
 
-        // Return right partition for tail recursion
         if start + len > kk {
             Some(SplitParams {
                 start: kk,
@@ -173,28 +187,22 @@ fn split(I: &mut [isize], V: &mut [isize], start: usize, len: usize, h: usize) {
     }
 }
 
-/// Suffix array construction using bucket sort + refinement
 fn qsufsort(I: &mut [isize], V: &mut [isize], old: &[u8]) {
-    // Bucket sort on first byte
     let mut buckets: [isize; 256] = [0; 256];
     
-    // Count occurrences
     for &o in old {
         buckets[o as usize] += 1;
     }
     
-    // Compute cumulative counts
     for i in 1..256 {
         buckets[i] += buckets[i - 1];
     }
     
-    // Shift to get start positions
     for i in (1..256).rev() {
         buckets[i] = buckets[i - 1];
     }
     buckets[0] = 0;
     
-    // Place suffixes into buckets
     for (i, &old_byte) in old.iter().enumerate() {
         buckets[old_byte as usize] += 1;
         I[usz(buckets[old_byte as usize])] = i as isize;
@@ -202,13 +210,11 @@ fn qsufsort(I: &mut [isize], V: &mut [isize], old: &[u8]) {
     
     I[0] = old.len() as isize;
     
-    // Initialize V with bucket positions
     for (i, &old_byte) in old.iter().enumerate() {
         V[i] = buckets[old_byte as usize];
     }
     V[old.len()] = 0;
     
-    // Mark singleton buckets
     for i in 1..256 {
         if buckets[i] == buckets[i - 1] + 1 {
             I[usz(buckets[i])] = -1;
@@ -216,7 +222,6 @@ fn qsufsort(I: &mut [isize], V: &mut [isize], old: &[u8]) {
     }
     I[0] = -1;
     
-    // Refine suffix array using doubling
     let mut h = 1;
     while I[0] != -(old.len() as isize + 1) {
         let mut len = 0;
@@ -238,16 +243,14 @@ fn qsufsort(I: &mut [isize], V: &mut [isize], old: &[u8]) {
         if len != 0 {
             I[usz(i - len)] = -len;
         }
-        h += h; // Double h each iteration
+        h += h;
     }
     
-    // Invert suffix array: V[I[i]] = i
     for (i, &v) in V[0..=old.len()].iter().enumerate() {
         I[usz(v)] = i as isize;
     }
 }
 
-/// Count matching bytes between two slices
 #[inline]
 fn matchlen(old: &[u8], new: &[u8]) -> usize {
     old.iter()
@@ -256,7 +259,6 @@ fn matchlen(old: &[u8], new: &[u8]) -> usize {
         .count()
 }
 
-/// Binary search in suffix array for best match
 fn search(I: &[isize], old: &[u8], new: &[u8]) -> (isize, usize) {
     if I.len() < 3 {
         let x = matchlen(&old[usz(I[0])..], new);
@@ -292,15 +294,13 @@ fn offtout(x: isize, buf: &mut [u8]) {
     }
 }
 
+/// Original bsdiff algorithm that writes directly (for backward compatibility)
 fn bsdiff_internal(old: &[u8], new: &[u8], writer: &mut dyn Write) -> io::Result<()> {
-    // Allocate suffix array and workspace
     let mut I = vec![0; old.len() + 1];
     let mut V = vec![0; old.len() + 1];
     
-    // Build suffix array
     qsufsort(&mut I, &mut V, old);
 
-    // Reuse buffer for diff computation
     let mut buffer = Vec::with_capacity(1024);
 
     let mut scan = 0;
@@ -315,13 +315,11 @@ fn bsdiff_internal(old: &[u8], new: &[u8], writer: &mut dyn Write) -> io::Result
         scan += len;
         let mut scsc = scan;
         
-        // Find next matching block
         while scan < new.len() {
             let (p, l) = search(&I[..=old.len()], old, &new[scan..]);
             pos = usz(p);
             len = l;
             
-            // Score matches in overlap region
             while scsc < scan + len {
                 if scsc as isize + lastoffset < old.len() as _
                     && (old[usz(scsc as isize + lastoffset)] == new[scsc])
@@ -331,7 +329,6 @@ fn bsdiff_internal(old: &[u8], new: &[u8], writer: &mut dyn Write) -> io::Result
                 scsc += 1;
             }
             
-            // Accept match if good enough
             if len == oldscore && (len != 0) || len > oldscore + 8 {
                 break;
             }
@@ -348,7 +345,6 @@ fn bsdiff_internal(old: &[u8], new: &[u8], writer: &mut dyn Write) -> io::Result
             continue;
         }
         
-        // Find optimal split point (forward)
         let mut s = 0;
         let mut Sf = 0;
         let mut lenf = 0usize;
@@ -365,7 +361,6 @@ fn bsdiff_internal(old: &[u8], new: &[u8], writer: &mut dyn Write) -> io::Result
             lenf = i;
         }
         
-        // Find optimal split point (backward)
         let mut lenb = 0;
         if scan < new.len() {
             let mut s = 0isize;
@@ -383,7 +378,6 @@ fn bsdiff_internal(old: &[u8], new: &[u8], writer: &mut dyn Write) -> io::Result
             }
         }
         
-        // Handle overlap between forward and backward matches
         if lastscan + lenf > scan - lenb {
             let overlap = lastscan + lenf - (scan - lenb);
             let mut s = 0;
@@ -405,7 +399,7 @@ fn bsdiff_internal(old: &[u8], new: &[u8], writer: &mut dyn Write) -> io::Result
             lenb -= lens;
         }
         
-        // Write control tuple
+        // Write control tuple (original format)
         let mut buf: [u8; 24] = [0; 24];
         offtout(lenf as _, &mut buf[..8]);
         offtout(
@@ -418,7 +412,7 @@ fn bsdiff_internal(old: &[u8], new: &[u8], writer: &mut dyn Write) -> io::Result
         );
         writer.write_all(&buf[..24])?;
 
-        // Write diff data (optimized: reuse buffer)
+        // Write diff data
         buffer.clear();
         buffer.extend(
             new[lastscan..lastscan + lenf]
@@ -428,12 +422,147 @@ fn bsdiff_internal(old: &[u8], new: &[u8], writer: &mut dyn Write) -> io::Result
         );
         writer.write_all(&buffer)?;
 
-        // Write extra data (literal copy)
+        // Write extra data
         let write_len = scan - lenb - (lastscan + lenf);
         let write_start = lastscan + lenf;
         writer.write_all(&new[write_start..write_start + write_len])?;
 
-        // Update positions
+        lastscan = scan - lenb;
+        lastpos = pos - lenb;
+        lastoffset = pos as isize - scan as isize;
+    }
+
+    Ok(())
+}
+
+/// Bsdiff algorithm using Bsdf2Writer (for BSDF2 format)
+fn bsdiff_with_writer(old: &[u8], new: &[u8], writer: &mut Bsdf2Writer) -> io::Result<()> {
+    let mut I = vec![0; old.len() + 1];
+    let mut V = vec![0; old.len() + 1];
+    
+    qsufsort(&mut I, &mut V, old);
+
+    let mut buffer = Vec::with_capacity(1024);
+
+    let mut scan = 0;
+    let mut len = 0usize;
+    let mut pos = 0usize;
+    let mut lastscan = 0;
+    let mut lastpos = 0;
+    let mut lastoffset = 0isize;
+    
+    while scan < new.len() {
+        let mut oldscore = 0;
+        scan += len;
+        let mut scsc = scan;
+        
+        while scan < new.len() {
+            let (p, l) = search(&I[..=old.len()], old, &new[scan..]);
+            pos = usz(p);
+            len = l;
+            
+            while scsc < scan + len {
+                if scsc as isize + lastoffset < old.len() as _
+                    && (old[usz(scsc as isize + lastoffset)] == new[scsc])
+                {
+                    oldscore += 1;
+                }
+                scsc += 1;
+            }
+            
+            if len == oldscore && (len != 0) || len > oldscore + 8 {
+                break;
+            }
+            
+            if scan as isize + lastoffset < old.len() as _
+                && (old[usz(scan as isize + lastoffset)] == new[scan])
+            {
+                oldscore -= 1;
+            }
+            scan += 1;
+        }
+        
+        if !(len != oldscore || scan == new.len()) {
+            continue;
+        }
+        
+        let mut s = 0;
+        let mut Sf = 0;
+        let mut lenf = 0usize;
+        let mut i = 0usize;
+        while lastscan + i < scan && (lastpos + i < old.len() as _) {
+            if old[lastpos + i] == new[lastscan + i] {
+                s += 1;
+            }
+            i += 1;
+            if s * 2 - i as isize <= Sf * 2 - lenf as isize {
+                continue;
+            }
+            Sf = s;
+            lenf = i;
+        }
+        
+        let mut lenb = 0;
+        if scan < new.len() {
+            let mut s = 0isize;
+            let mut Sb = 0;
+            let mut i = 1;
+            while scan >= lastscan + i && (pos >= i) {
+                if old[pos - i] == new[scan - i] {
+                    s += 1;
+                }
+                if s * 2 - i as isize > Sb * 2 - lenb as isize {
+                    Sb = s;
+                    lenb = i;
+                }
+                i += 1;
+            }
+        }
+        
+        if lastscan + lenf > scan - lenb {
+            let overlap = lastscan + lenf - (scan - lenb);
+            let mut s = 0;
+            let mut Ss = 0;
+            let mut lens = 0;
+            for i in 0..overlap {
+                if new[lastscan + lenf - overlap + i] == old[lastpos + lenf - overlap + i] {
+                    s += 1;
+                }
+                if new[scan - lenb + i] == old[pos - lenb + i] {
+                    s -= 1;
+                }
+                if s > Ss {
+                    Ss = s;
+                    lens = i + 1;
+                }
+            }
+            lenf = lenf + lens - overlap;
+            lenb -= lens;
+        }
+        
+        // Add control entry
+        let entry = ControlEntry {
+            diff_size: lenf as i64,
+            extra_size: (scan as isize - lenb as isize - (lastscan + lenf) as isize) as i64,
+            offset_increment: (pos as isize - lenb as isize - (lastpos + lenf) as isize) as i64,
+        };
+        writer.add_control_entry(entry)?;
+
+        // Write diff data
+        buffer.clear();
+        buffer.extend(
+            new[lastscan..lastscan + lenf]
+                .iter()
+                .zip(&old[lastpos..lastpos + lenf])
+                .map(|(n, o)| n.wrapping_sub(*o)),
+        );
+        writer.write_diff_stream(&buffer)?;
+
+        // Write extra data
+        let write_len = scan - lenb - (lastscan + lenf);
+        let write_start = lastscan + lenf;
+        writer.write_extra_stream(&new[write_start..write_start + write_len])?;
+
         lastscan = scan - lenb;
         lastpos = pos - lenb;
         lastoffset = pos as isize - scan as isize;
